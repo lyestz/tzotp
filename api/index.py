@@ -30,9 +30,8 @@ def connect_to_imap():
         mail.login(USERNAME, PASSWORD)
         return mail
     except Exception as e:
-        error_message = f"Error connecting to IMAP server: {str(e)}"
-        app.logger.error(error_message)
-        return None, error_message
+        print(f"Error connecting to IMAP server: {e}")
+        return None
 
 def search_unread_emails(mail):
     """Search unread emails."""
@@ -41,18 +40,14 @@ def search_unread_emails(mail):
         status, messages = mail.search(None, 'UNSEEN')
         return messages[0].split() if status == "OK" else []
     except Exception as e:
-        error_message = f"Error searching emails: {str(e)}"
-        app.logger.error(error_message)
-        return [], error_message
+        print(f"Error searching emails: {e}")
+        return []
 
 def check_and_delete_emails(mail, mymail, search_string):
     """Check and delete emails if they match criteria."""
-    email_ids, search_error = search_unread_emails(mail)
-    if search_error:
-        return False, None, search_error
-
+    email_ids = search_unread_emails(mail)
     if not email_ids:
-        return False, None, "No unread emails found."
+        return False, None
 
     for email_id in email_ids:
         try:
@@ -79,38 +74,35 @@ def check_and_delete_emails(mail, mymail, search_string):
 
                         if search_string in body:
                             match = re.search(r'\b\d{6}\b', body)
-                            verification_code = match.group() if match else "No code found"
-                            mail.store(email_id, '+FLAGS', '\\Deleted')
-                            return True, verification_code, None
+                            if match:
+                                verification_code = match.group()
+                                print(verification_code)
+                                mail.store(email_id, '+FLAGS', '\\Deleted')
+                                return True, verification_code
+                            else:
+                                mail.store(email_id, '+FLAGS', '\\Deleted')
+                                return True, "No code found"
                         else:
                             mail.store(email_id, '+FLAGS', '\\Deleted')
-                            return True, "No code found", None
+                            return True, "No code found"
         except Exception as e:
-            error_message = f"Error processing email: {str(e)}"
-            app.logger.error(error_message)
-            return False, None, error_message
+            print(f"Error processing email: {e}")
 
     mail.expunge()
-    return False, None, "No matching emails found."
+    return False, None
 
 @app.route('/check-emails', methods=['GET'])
 def check_emails_api():
     """API endpoint to check emails."""
-    mail, connection_error = connect_to_imap()
+    mail = connect_to_imap()
     if not mail:
-        return jsonify({"status": "error", "message": connection_error}), 500
+        return jsonify({"message": "Failed to connect to the IMAP server."}), 500
     
     myemail = request.args.get('Email')
-    if not myemail:
-        return jsonify({"status": "error", "message": "Email parameter is required."}), 400
-
-    result, email_body, error = check_and_delete_emails(mail, myemail, SEARCH_STRING)
-    
+    result, email_body = check_and_delete_emails(mail, myemail, SEARCH_STRING)
     mail.close()
     mail.logout()
 
-    if error:
-        return jsonify({"status": "error", "message": error}), 500
     return jsonify({"status": "ok" if result else "no", "email_body": email_body}), (200 if result else 404)
 
 # Vercel needs `app` to be exposed
