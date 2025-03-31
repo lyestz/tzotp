@@ -17,7 +17,7 @@ app.logger.disabled = True
 
 # Email credentials (Use environment variables for security)
 USERNAME = os.getenv("EMAIL_USERNAME", "massilaskadi@gmail.com")
-PASSWORD = os.getenv("EMAIL_PASSWORD", "ibkidqshjxahdszh")
+PASSWORD = os.getenv("EMAIL_PASSWORD", "rqpujwulgfeyzxer")
 IMAP_SERVER = 'imap.gmail.com'
 
 # Search string for email
