@@ -1,81 +1,110 @@
-import datetime
-import pytz
-import base64
-import json
-from flask import Flask, request, jsonify
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
-from bs4 import BeautifulSoup
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-
-SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
-
-# Embed credentials JSON directly into the script
-CREDENTIALS_JSON = {
-    "installed": {
-        "client_id": "your_client_id",
-        "project_id": "your_project_id",
-        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-        "token_uri": "https://oauth2.googleapis.com/token",
-        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-        "client_secret": "your_client_secret",
-        "redirect_uris": ["http://localhost"]
-    }
-}
-
-TOKEN_JSON = {
-    "token": "your_token",
-    "refresh_token": "your_refresh_token",
-    "token_uri": "https://oauth2.googleapis.com/token",
-    "client_id": "your_client_id",
-    "client_secret": "your_client_secret",
-    "scopes": SCOPES
-}
+from flask import Flask, jsonify, request
+import imaplib
+import email
+from flask_cors import CORS
+from email.header import decode_header
+import logging
+import re
+import os
 
 app = Flask(__name__)
+CORS(app)
 
-class GmailAPI:
-    def __init__(self):
-        self.creds = None
-        if TOKEN_JSON:
-            self.creds = Credentials.from_authorized_user_info(TOKEN_JSON, SCOPES)
-        if not self.creds or not self.creds.valid:
-            if self.creds and self.creds.expired and self.creds.refresh_token:
-                self.creds.refresh(Request())
-            else:
-                flow = InstalledAppFlow.from_client_config(CREDENTIALS_JSON, SCOPES)
-                self.creds = flow.run_local_server(port=0)
+# Disable Flask's default logging
+log = logging.getLogger('werkzeug')
+log.disabled = True
+app.logger.disabled = True
 
-    def get_ManageAppointment_otp(self, target):
-        current_time = datetime.datetime.utcnow()
-        time_threshold_start = current_time - datetime.timedelta(minutes=10)
-        time_threshold_end = current_time + datetime.timedelta(minutes=10)
-        
-        time_start_unix = int(time_threshold_start.replace(tzinfo=pytz.UTC).timestamp())
-        time_end_unix = int(time_threshold_end.replace(tzinfo=pytz.UTC).timestamp())
-        
+# Email credentials (Use environment variables for security)
+USERNAME = os.getenv("EMAIL_USERNAME", "massilaskadi@gmail.com")
+PASSWORD = os.getenv("EMAIL_PASSWORD", "ibkidqshjxahdszh")
+IMAP_SERVER = 'imap.gmail.com'
+
+# Search string for email
+SEARCH_STRING = "mentioned below"
+
+def connect_to_imap():
+    """Connect to IMAP server."""
+    try:
+        mail = imaplib.IMAP4_SSL(IMAP_SERVER)
+        mail.login(USERNAME, PASSWORD)
+        return mail
+    except Exception as e:
+        print(f"Error connecting to IMAP server: {e}")
+        return None
+
+def search_unread_emails(mail):
+    """Search unread emails."""
+    try:
+        mail.select("inbox")
+        status, messages = mail.search(None, 'UNSEEN')
+        return messages[0].split() if status == "OK" else []
+    except Exception as e:
+        print(f"Error searching emails: {e}")
+        return []
+
+def check_and_delete_emails(mail, mymail, search_string):
+    """Check and delete emails if they match criteria."""
+    email_ids = search_unread_emails(mail)
+    if not email_ids:
+        return False, None
+
+    for email_id in email_ids:
         try:
-            service = build('gmail', 'v1', credentials=self.creds)
-            query = f"FROM:info@blsinternational.com TO:{target} SUBJECT:BLS Visa Appointment - Email Verification after:{time_start_unix} before:{time_end_unix}"
-            results = service.users().messages().list(userId='me', q=query, maxResults=1).execute()
-            messages = results.get('messages')
-            if messages:
-                txt = service.users().messages().get(userId='me', id=messages[0]['id']).execute()
-                return txt["snippet"].split("Your verification code is as mentioned below ")[1][:6]
-            return "No OTP found"
-        except HttpError as error:
-            return f'An error occurred: {error}'
+            status, msg_data = mail.fetch(email_id, "(RFC822)")
+            for response_part in msg_data:
+                if isinstance(response_part, tuple):
+                    msg = email.message_from_bytes(response_part[1])
+                    subject, encoding = decode_header(msg["Subject"])[0]
+                    if isinstance(subject, bytes):
+                        subject = subject.decode(encoding or "utf-8", errors="replace")
+                    from_email = msg.get("From")
 
-@app.route('/api/get_otp', methods=['GET'])
-def get_otp():
-    target = request.args.get('email')
-    if not target:
-        return jsonify({"error": "Email parameter is required"}), 400
-    gmail_api = GmailAPI()
-    otp = gmail_api.get_ManageAppointment_otp(target)
-    return jsonify({"email": target, "otp": otp})
+                    if "Email Verification" in subject and mymail in from_email:
+                        body = ""
+                        if msg.is_multipart():
+                            for part in msg.walk():
+                                content_type = part.get_content_type()
+                                content_disposition = str(part.get("Content-Disposition"))
+                                if content_type == "text/plain" and "attachment" not in content_disposition:
+                                    body = part.get_payload(decode=True).decode("utf-8", errors="replace")
+                                    break
+                        else:
+                            body = msg.get_payload(decode=True).decode("utf-8", errors="replace")
 
-if __name__ == '__main__':
+                        if search_string in body:
+                            match = re.search(r'\b\d{6}\b', body)
+                            if match:
+                                verification_code = match.group()
+                                print(verification_code)
+                                mail.store(email_id, '+FLAGS', '\\Deleted')
+                                return True, verification_code
+                            else:
+                                mail.store(email_id, '+FLAGS', '\\Deleted')
+                                return True, "No code found"
+                        else:
+                            mail.store(email_id, '+FLAGS', '\\Deleted')
+                            return True, "No code found"
+        except Exception as e:
+            print(f"Error processing email: {e}")
+
+    mail.expunge()
+    return False, None
+
+@app.route('/check-emails', methods=['GET'])
+def check_emails_api():
+    """API endpoint to check emails."""
+    mail = connect_to_imap()
+    if not mail:
+        return jsonify({"message": "Failed to connect to the IMAP server."}), 500
+    
+    myemail = request.args.get('Email')
+    result, email_body = check_and_delete_emails(mail, myemail, SEARCH_STRING)
+    mail.close()
+    mail.logout()
+
+    return jsonify({"status": "ok" if result else "no", "email_body": email_body}), (200 if result else 404)
+
+# Vercel needs `app` to be exposed
+if __name__ == "__main__":
     app.run(debug=True)
