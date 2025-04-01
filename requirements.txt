@@ -1,6 +1,6 @@
 Flask==2.2.5
 Flask-Cors==3.0.10
-imaplib2==2.101
+imapclient==2.1.0
 pytz==2024.1
 email-validator==2.1.1
 gunicorn==21.2.0
