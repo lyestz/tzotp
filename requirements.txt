@@ -1,4 +1,4 @@
 fastapi==0.110.0
 uvicorn==0.29.0
-imap2dict==0.1.7
+imap2dict
 mangum==0.17.0
