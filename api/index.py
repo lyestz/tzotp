@@ -1,80 +1,101 @@
+from flask import Flask, jsonify, request
 import imaplib
 import email
-import datetime
-import pytz
-from flask import Flask, request, jsonify
 from flask_cors import CORS
+from email.header import decode_header
+from gevent.pywsgi import WSGIServer
+import re
 import logging
-
-# Gmail IMAP settings
-IMAP_SERVER = "imap.gmail.com"
-IMAP_PORT = 993
-EMAIL_ACCOUNT = "massilaskadi@gmail.com"
-EMAIL_PASSWORD = "rqpujwulgfeyzxer"
-
+import os
+os.system('color')
 app = Flask(__name__)
 CORS(app)
+logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.WARNING)
+search_string = "I have read and understood the information"
+username = "frnnanniesairra195p@gmail.com"
+password = "fscmysjxgenfffcn"
 
-# Disable Flask's default logging
-log = logging.getLogger('werkzeug')
-log.disabled = True
-app.logger.disabled = True
+def connect_to_gmail():
+    mail = imaplib.IMAP4_SSL("imap.gmail.com")
+    mail.login(username, password)
+    return mail
 
-class IMAPGmail:
-    def __init__(self):
-        self.mail = imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT)
-        self.mail.login(EMAIL_ACCOUNT, EMAIL_PASSWORD)
-        self.mail.select("inbox")
+def search_unread_emails(mail):
+    mail.select("inbox")
+    status, messages = mail.search(None, 'UNSEEN')
+    return messages[0].split()
 
-    def get_ManageAppointment_otp(self, target):
-        current_time = datetime.datetime.utcnow().replace(tzinfo=pytz.UTC)
-        time_threshold_start = current_time - datetime.timedelta(minutes=10)
-        time_threshold_end = current_time + datetime.timedelta(minutes=10)
-        date_since = time_threshold_start.strftime("%d-%b-%Y")
-        date_before = time_threshold_end.strftime("%d-%b-%Y")
-        search_criteria = f'(FROM "info@blsinternational.com" TO "{target}" SUBJECT "BLS Visa Appointment - Email Verification" SINCE "{date_since}" BEFORE "{date_before}")'
-        try:
-            status, message_ids = self.mail.search(None, search_criteria)
-            if status != "OK" or not message_ids[0]:
-                return "No OTP found"
+def check_and_delete_emails(mail, search_string, an):
+    email_ids = search_unread_emails(mail)
+    if not email_ids:
+        return False, None
+    for email_id in email_ids:
+        status, msg_data = mail.fetch(email_id, "(RFC822)")
+        for response_part in msg_data:
+            if isinstance(response_part, tuple):
+                msg = email.message_from_bytes(response_part[1])
+                subject, encoding = decode_header(msg["To"])[0]
+                if isinstance(subject, bytes):
+                    subject = subject.decode(encoding if encoding else "utf-8")
 
-            message_ids = message_ids[0].split()
-            latest_email_id = message_ids[-1]
-            status, msg_data = self.mail.fetch(latest_email_id, "(RFC822)")
-            if status != "OK":
-                return "Error fetching email"
+                string_found = False
+                email_body = None
+                if msg.is_multipart():
+                    for part in msg.walk():
+                        try:
+                            body = part.get_payload(decode=True).decode()
+                            if search_string in body and an in subject:
+                                string_found = True
+                                email_body = body
+                                break
+                        except:
+                            pass
+                else:
+                    try:
+                        body = msg.get_payload(decode=True).decode()
+                        if search_string in body and an in subject:
+                            string_found = True
+                            email_body = body
+                    except:
+                        pass
 
-            raw_email = msg_data[0][1]
-            msg = email.message_from_bytes(raw_email)
-            email_body = ""
+                if string_found:
+                    print(f"Deleting email with subject: {subject}")
+                    url_pattern = r'http[s]?://[^\s]+click\?upn[^\s]*>'
+                    urls = re.findall(url_pattern, email_body)[0].replace(">", "")
+                    mail.store(email_id, '+FLAGS', '\\Deleted')
+                    return True, urls
 
-            if msg.is_multipart():
-                for part in msg.walk():
-                    if part.get_content_type() == "text/plain":
-                        email_body = part.get_payload(decode=True).decode(errors='ignore')
-                        break
-            else:
-                email_body = msg.get_payload(decode=True).decode(errors='ignore')
+    mail.expunge()
+    return False, None
 
-            otp_start = "Your verification code is as mentioned below "
-            if otp_start in email_body:
-                return email_body.split(otp_start)[1][:6]
+@app.route('/check-emails', methods=['GET'])
 
-            return "No OTP found"
-        except Exception as e:
-            return f'An error occurred: {e}'
-        finally:
-            self.mail.logout()
-
-@app.route('/get_otp', methods=['GET'])
-def get_otp():
-    target = request.args.get('email')
-    if not target:
-        return jsonify({"error": "Email parameter is required"}), 400
-
-    imap_gmail = IMAPGmail()
-    otp = imap_gmail.get_ManageAppointment_otp(target)
-    return jsonify({"email": target, "otp": otp})
+def check_emails_api():
+    email = request.args.get('email')
+    mail = connect_to_gmail()
+    result, email_body = check_and_delete_emails(mail, search_string, email)
+    mail.close()
+    mail.logout()
+    if result:
+        print(f"\033[92m>{email}: Statue:Delivred. \033[92m")
+        return jsonify({"status": "ok", "email_body": email_body})
+        
+    else:
+        return jsonify({"status": "no"})
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    ascii_art = '''
+    \033[92m▄▄▄█████▓▒███████▒     ██████  ██▓███   ▄▄▄       ██▀███  ▄▄▄█████▓
+    ▓  ██▒ ▓▒▒ ▒ ▒ ▄▀░   ▒██    ▒ ▓██░  ██▒▒████▄    ▓██ ▒ ██▒▓  ██▒ ▓▒
+    ▒ ▓██░ ▒░░ ▒ ▄▀▒░    ░ ▓██▄   ▓██░ ██▓▒▒██  ▀█▄  ▓██ ░▄█ ▒▒ ▓██░ ▒░
+    ░ ▓██▓ ░   ▄▀▒   ░     ▒   ██▒▒██▄█▓▒ ▒░██▄▄▄▄██ ▒██▀▀█▄  ░ ▓██▓ ░ 
+      ▒██▒ ░ ▒███████▒   ▒██████▒▒▒██▒ ░  ░ ▓█   ▓██▒░██▓ ▒██▒  ▒██▒ ░ 
+      ▒ ░░   ░▒▒ ▓░▒░▒   ▒ ▒▓▒ ▒ ░▒▓▒░ ░  ░ ▒▒   ▓▒█░░ ▒▓ ░▒▓░  ▒ ░░   
+        ░    ░░▒ ▒ ░ ▒   ░ ░▒  ░ ░░▒ ░       ▒   ▒▒ ░  ░▒ ░ ▒░    ░    
+      ░      ░ ░ ░ ░ ░   ░  ░  ░  ░░         ░   ▒     ░░   ░   ░      \033[0m'''
+    print(ascii_art)
+    print('\033[94m                 Data protection Bls Snifer SPART V:1.01\033[0m')
+    http_server = WSGIServer(('127.0.0.1', 3000), app)
+    http_server.serve_forever()
