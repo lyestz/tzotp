@@ -1,11 +1,11 @@
-from flask import Flask, jsonify, request
 import imaplib
 import email
-from flask_cors import CORS
-from email.header import decode_header
+import os
 import re
 import logging
-import os
+from flask import Flask, jsonify, request
+from flask_cors import CORS
+from email.header import decode_header
 
 app = Flask(__name__)
 CORS(app)
@@ -91,7 +91,7 @@ def check_and_delete_emails(mail, search_string, recipient_email):
     return False, None
 
 
-@app.route("/check-emails", methods=["GET"])
+@app.route("/api/check-emails", methods=["GET"])
 def check_emails_api():
     recipient_email = request.args.get("email")
     if not recipient_email:
@@ -112,11 +112,6 @@ def check_emails_api():
     return jsonify({"status": "no"})
 
 
-# Vercel requires an "app" variable
+# Vercel handler
 def handler(event, context):
     return app(event, context)
-
-
-if __name__ == "__main__":
-    from waitress import serve
-    serve(app, host="0.0.0.0", port=int(os.environ.get("PORT", 3000)))
