@@ -1,4 +1,6 @@
-fastapi==0.110.0
-uvicorn==0.29.0
-imap2dict
-mangum==0.17.0
+beautifulsoup4==4.13.3
+fastapi==0.115.12
+flask-cors==5.0.1
+flask==3.1.0
+pydantic==2.11.2
+pytz==2025.2
