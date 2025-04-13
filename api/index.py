@@ -13,7 +13,7 @@ CORS(app)
 
 IMAP_SERVER = "imap.gmail.com"
 IMAP_PORT = 993
-SPECIFIC_SENDER = "massilaskadi@gmail.com"
+SPECIFIC_SENDER = "Info@blsinternational.com"
 SPECIFIC_STRING = "BLS Visa Appointment - Email Verification"
 
 def get_body(msg):
